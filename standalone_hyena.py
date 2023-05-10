@@ -7,7 +7,10 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import TensorDataset, Dataset, DataLoader
 from einops import rearrange
+
+from src.dataloaders.FHN import get_data as make_FHN
 
 
 def fftconv(u, k, D):
@@ -253,16 +256,71 @@ class HyenaOperator(nn.Module):
     
 if __name__ == "__main__":
     layer = HyenaOperator(
-        d_model=512, 
-        l_max=1024, 
+        d_model=1, 
+        l_max=1000, 
         order=2, 
-        filter_order=64
+        filter_order=8
     )
-    x = torch.randn(1, 1024, 512, requires_grad=True)
-    y = layer(x)
+    train_FHN_x, train_FHN_y = make_FHN(128)
+    train_FHN_x = torch.tensor(train_FHN_x, dtype=torch.float32)
+    train_FHN_y = torch.tensor(train_FHN_y, dtype=torch.float32)
+    x = train_FHN_x[0,:,:].unsqueeze(0)
+    x.requires_grad = True
+    output = layer(x)
         
-    print(x.shape, y.shape)
+    print(x.shape, output.shape)
+    def count_parameters(model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Number of trainable parameters: {count_parameters(layer)}")
     
-    grad = torch.autograd.grad(y[:, 10, :].sum(), x)[0]
+    grad = torch.autograd.grad(output[:, 10, :].sum(), x)[0]
     print('Causality check: gradients should not flow "from future to past"')
     print(grad[0, 11, :].sum(), grad[0, 9, :].sum())
+
+    optimizer = torch.optim.Adam(layer.parameters(), lr=1e-3)
+    loss_fn = torch.nn.MSELoss()
+
+    train_FHN = TensorDataset(train_FHN_x, train_FHN_y) # batch_size x seq_len x input_dim
+    train_FHN = DataLoader(train_FHN, batch_size=32, shuffle=True)
+
+    val_FHN_x, val_FHN_y = make_FHN(128)
+    val_FHN = TensorDataset(torch.tensor(val_FHN_x, dtype=torch.float32), torch.tensor(val_FHN_y, dtype=torch.float32))
+    val_FHN = DataLoader(val_FHN, batch_size=128, shuffle=False)
+
+    test_FHN_x, test_FHN_y = make_FHN(128)
+    test_FHN = TensorDataset(torch.tensor(test_FHN_x, dtype=torch.float32), torch.tensor(test_FHN_y, dtype=torch.float32))
+    test_FHN = DataLoader(test_FHN, batch_size=128, shuffle=False)
+
+    total_loss = 0
+
+    def eval(in_dataloader):
+        with torch.no_grad():
+            for i, data in enumerate(in_dataloader):
+                inputs, targets = data
+                outputs = layer(inputs)
+                loss = loss_fn(outputs, targets)
+        return torch.sqrt(loss).item()
+
+    for epoch in range(400):
+        for i, data in enumerate(train_FHN):
+            inputs, targets = data
+            optimizer.zero_grad()
+            outputs = layer(inputs)
+
+            loss = loss_fn(outputs, targets)
+            print(loss)
+            loss.backward()
+
+            optimizer.step()
+
+            total_loss += loss
+
+        print(f"Epoch: {epoch}, loss: {total_loss/epoch}")
+
+        val_loss = eval(val_FHN)
+        test_loss = eval(test_FHN)
+
+        print(f"Epoch: {epoch}, val loss: {val_loss}, test loss: {test_loss}")
+
+    
+

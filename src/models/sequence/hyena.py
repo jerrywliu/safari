@@ -357,3 +357,81 @@ class HyenaOperator(nn.Module):
     @property
     def d_output(self):
         return self.d_model
+
+class HyenaSequenceModel(nn.Module):
+
+    def __init__(
+        self,
+        d_model,
+        l_max,
+        n_layer=2,
+        non_linearity=F.gelu,
+        skip="identity",
+        order=2, 
+        filter_order=64,
+        num_heads=1, 
+        inner_factor=1,
+        num_blocks=1, 
+        fused_bias_fc=False,
+        outer_mixing=False,
+        dropout=0.0,  
+        filter_dropout=0.0, 
+        filter_cls='hyena-filter',
+        post_order_ffn=False,
+        jit_filter=False, 
+        short_filter_order=3, 
+        activation="id",
+        return_state=False,
+        **filter_args,
+    ):
+
+        super().__init__()
+
+        self.n_layer = n_layer
+        self.return_state = return_state
+        self.non_linearity = non_linearity
+
+        if skip == "identity":
+            skip_connection = nn.Identity()
+
+        self.hyena_layers = nn.ModuleList([
+            HyenaOperator(
+                d_model,
+                l_max,
+                order=order, 
+                filter_order=filter_order,
+                num_heads=num_heads, 
+                inner_factor=inner_factor,
+                num_blocks=num_blocks, 
+                fused_bias_fc=fused_bias_fc,
+                outer_mixing=outer_mixing,
+                dropout=dropout,  
+                filter_dropout=filter_dropout, 
+                filter_cls=filter_cls,
+                post_order_ffn=post_order_ffn,
+                jit_filter=jit_filter, 
+                short_filter_order=short_filter_order,
+                activation=activation,
+                return_state=return_state,
+                **filter_args,
+            )
+            for _ in range(self.n_layer)
+        ])
+
+        self.skip_layers = nn.ModuleList([
+            skip_connection for _ in range(self.n_layer)
+        ])
+
+    def forward(self, u, *args, **kwargs):
+        for i in range(self.n_layer):
+            if self.return_state:
+                u_hyena, _ = self.hyena_layers[i](u)
+            else:
+                u_hyena = self.hyena_layers[i](u)
+            u_skip = self.skip_layers[i](u)
+            u = u_hyena + u_skip
+            if i < self.n_layer-1:
+                u = self.non_linearity(u)
+        if self.return_state:
+            return u, None
+        return u

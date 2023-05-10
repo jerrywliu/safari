@@ -159,6 +159,20 @@ class Scalar(nn.Module):
     def forward(self, x):
         return x * self.c
 
+
+class PDETask(BaseTask):
+    def forward(self, batch, encoder, model, decoder, _state):
+        """Passes a batch through the encoder, backbone, and decoder"""
+        # z holds arguments such as sequence length
+        x, y, pde_params = batch # z holds extra dataloader info such as resolution
+
+        x, w = encoder(x) # w can model-specific constructions such as key_padding_mask for transformers or state for RNNs
+        x, state = model(x, pde_params, **w, state=_state)
+        self._state = state
+        x, w = decoder(x, state=state)
+        return x, y, w
+
+
 class LMTask(BaseTask):
     def forward(self, batch, encoder, model, decoder, _state):
         """Passes a batch through the encoder, backbone, and decoder"""
@@ -364,6 +378,7 @@ class ImageNetTask(BaseTask):
 
 registry = {
     'base': BaseTask,
+    'pde': PDETask,
     'lm': LMTask,
     'imagenet': ImageNetTask,
     'forecasting': ForecastingTask,

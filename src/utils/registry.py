@@ -24,6 +24,11 @@ model = {
     "lm": "src.models.sequence.long_conv_lm.ConvLMHeadModel",
     "lm_simple": "src.models.sequence.simple_lm.SimpleLMHeadModel",
     "vit_b_16": "src.models.baselines.vit_all.vit_base_patch16_224",
+    "hyena_sequence": "src.models.sequence.hyena_seq.HyenaSequenceModel",
+    # "hyena_sequence": "src.models.sequence.hyena.HyenaSequenceModel",
+    "hyena_operator": "src.models.sequence.hyena.HyenaOperator",
+    # "fno_base": "src.models.sequence.fno_base.FNOBase", # non-icl baseline
+    "fno_base": "src.models.sequence.hyena_seq.FNOBaseline",
 }
 
 layer = {

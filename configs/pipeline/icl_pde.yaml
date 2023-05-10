@@ -1,0 +1,21 @@
+# @package _global_
+defaults:
+  - /trainer: default
+  - /loader: default
+  - /dataset: icl_pde
+  - /optimizer: adamw
+  - /scheduler: cosine_warmup
+  - /callbacks: base
+
+train:
+  monitor: val/accuracy_ignore_index
+  mode: max
+
+task:
+  _name_: pde
+  loss: mse_forecast
+  # metrics: ['mse_forecast', "mse", "mse_relative"]
+  metrics: ["mse_forecast"]
+
+encoder: null
+decoder: null

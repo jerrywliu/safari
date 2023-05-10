@@ -1,0 +1,65 @@
+# @package _global_
+defaults:
+  - /experiment/synthetics/associative_recall/base.yaml
+  - override /pipeline: icl_pde
+
+dataset:
+  num_examples: 8196
+  num_test_examples: 1024
+  num_initial_conditions: 20
+  batch_size: 16
+  # data_dir: "/usr/xtmp/jwl50/PDEBench/data/"
+  data_dir: "/usr/xtmp/jwl50/PDEBench/pdebench/data_gen/data_gen_NLE/save/burgers"
+  file_name: "1D/Burgers/Train/1D_Burgers_Sols_Nu0.1.hdf5"
+  # pde: "1d_burgers_icl_t2"
+  pde: "1d_burgers_icl_viscosity"
+
+train:
+  global_batch_size: 16
+
+trainer:
+  max_epochs: 5000
+
+# model:
+#   _name_: hyena_sequence
+#   d_model: 1024
+#   n_layer: 2
+#   d_inner: ${eval:4*${.d_model}}
+#   resid_dropout: 0.0
+#   embed_dropout: 0.1
+#   layer:
+#     _name_: hyena
+#     emb_dim: 5
+#     filter_order: 64
+#     local_order: 3
+#     # l_max: ${eval:2*${dataset.__l_max}}
+#     l_max: ${eval:2*${dataset.num_initial_conditions}}
+#     modulate: True
+#     w: 10
+#     lr: ${optimizer.lr}
+#     wd: 0.0
+#     lr_pos_emb: 0.0
+
+model:
+  _name_: fno_base
+  d_model: 1024
+  dropout: 0.1
+  fno_nmodes: 16
+  fno_nhidden: 64
+
+#---------------
+
+# model:
+#   _name_: hyena_operator
+#   d_model: 1
+#   order: 2
+#   l_max: ${eval:2*${dataset.num_initial_conditions}*${dataset.__l_max}}
+#   return_state: True
+
+# model:
+#   _name_: hyena_sequence
+#   d_model: 1
+#   order: 2
+#   l_max: ${eval:2*${dataset.num_initial_conditions}*${dataset.__l_max}}
+#   n_layer: 2
+#   return_state: True

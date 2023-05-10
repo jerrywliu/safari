@@ -1,0 +1,5 @@
+_name_: icl_pde
+num_examples: 1024
+num_test_examples: 1024
+__train_len: 1024 # problem dim
+__l_max: 1024 # problem dim

@@ -9,6 +9,7 @@ from tqdm import tqdm
 from collections import Counter
 
 from src.dataloaders.base import SequenceDataset
+from src.dataloaders.FHN import get_data as make_FHN
 
 class Vocab:
     """Custom vocab."""
@@ -166,6 +167,11 @@ def generate_assoc_recall(
     vocab_seq = vocab_seq + to_copy
     return " ".join(vocab_seq)
 
+def generate_fhn(
+    input_seq_len: int
+): # (1, 1000, 1), (1, 1000, 1)
+    return make_FHN(1)
+
 class ICLDataModule(SequenceDataset):
     _name_ = "icl_synthetics"
 
@@ -194,7 +200,7 @@ class ICLDataModule(SequenceDataset):
         self.input_seq_len = input_seq_len
         self.vocab_size = vocab_size
         self.copy_method = copy_method
-        assert copy_method in ["induction_head", "assoc_recall"]
+        assert copy_method in ["induction_head", "assoc_recall", "FHN"]
         self.number_duplicates_per_epoch = number_duplicates_per_epoch
         self.seed = seed
         self.batch_size = batch_size
@@ -227,6 +233,9 @@ class ICLDataModule(SequenceDataset):
         elif self.copy_method == "assoc_recall":
             self.copy_f = self.generate_assoc_recall
             self.num_extra_seq_len = 1 + self.num_keys
+        elif self.copy_method == "FHN":
+            self.copy_f = self.generate_fhn
+            self.num_extra_seq_len = 1
         else:
             self.copy_f = None
 
@@ -245,9 +254,15 @@ class ICLDataModule(SequenceDataset):
     def generate_assoc_recall(self, seqlen=None, valid_chars=None):
         return generate_assoc_recall(self.vocab, seqlen if seqlen is not None else self.input_seq_len, self.num_keys, self.rng, allow_dot = self.allow_dot, valid_chars=valid_chars)
 
+    def generate_fhn(self, seqlen=None, valid_chars=None):
+        return generate_fhn(seqlen if seqlen is not None else self.input_seq_len)
+
     def generate_example(self, seqlen=None, valid_chars=None):
         vocab_seq = self.copy_f(seqlen=seqlen, valid_chars=valid_chars)
-        return self.tokenizer.tokenize(vocab_seq, return_tensor=True)
+        if self.copy_method not in ["FHN"]:
+            return self.tokenizer.tokenize(vocab_seq, return_tensor=True)
+        else:
+            return vocab_seq
 
     def setup(self, stage=None):
         train_tensor = test_tensor = None
@@ -265,55 +280,71 @@ class ICLDataModule(SequenceDataset):
                 return
             self.rng = np.random.default_rng(self.seed)
 
-            if self.split_train_test:
-                all_vocab = self.vocab.non_special_vocab
-                train_vocab = set(self.rng.choice(all_vocab, size=len(all_vocab) // 2, replace=False))
-                test_vocab = set(all_vocab) - train_vocab
-                train_vocab = list(train_vocab)
-                test_vocab = list(test_vocab)
-            else:
-                train_vocab = None
-                test_vocab = None
+            if self.copy_method not in ["FHN"]:
+                # Make vocab
+                if self.split_train_test:
+                    all_vocab = self.vocab.non_special_vocab
+                    train_vocab = set(self.rng.choice(all_vocab, size=len(all_vocab) // 2, replace=False))
+                    test_vocab = set(all_vocab) - train_vocab
+                    train_vocab = list(train_vocab)
+                    test_vocab = list(test_vocab)
+                else:
+                    train_vocab = None
+                    test_vocab = None
 
-            all_examples = []
-            for i, (example_count, valid_vocab) in enumerate(zip([self.num_examples, self.num_test_examples], [train_vocab, test_vocab])):
-                examples = torch.stack([self.generate_example(
-                    seqlen=self.input_seq_len if i == 0 else self.test_seq_len,
-                    valid_chars=valid_vocab
-                )['input_ids'] for _ in tqdm(range(example_count))])
-                examples = torch.unique(examples, dim=0, sorted=False).tolist()
-                
-                while len(examples) < example_count:
-                    new_example = self.generate_example(
+                all_examples = []
+                for i, (example_count, valid_vocab) in enumerate(zip([self.num_examples, self.num_test_examples], [train_vocab, test_vocab])):
+                    examples = torch.stack([self.generate_example(
                         seqlen=self.input_seq_len if i == 0 else self.test_seq_len,
                         valid_chars=valid_vocab
-                    )['input_ids'].tolist()
-                    if new_example not in examples:
-                        examples.append(new_example)
+                    )['input_ids'] for _ in tqdm(range(example_count))])
+                    examples = torch.unique(examples, dim=0, sorted=False).tolist()
+                    
+                    while len(examples) < example_count:
+                        new_example = self.generate_example(
+                            seqlen=self.input_seq_len if i == 0 else self.test_seq_len,
+                            valid_chars=valid_vocab
+                        )['input_ids'].tolist()
+                        if new_example not in examples:
+                            examples.append(new_example)
 
-                self.rng.shuffle(examples)
-                all_examples.append(torch.LongTensor(examples))
+                    self.rng.shuffle(examples)
+                    all_examples.append(torch.LongTensor(examples))
 
-            # all_examples = torch.concat(all_examples)
-            train_tensor = torch.stack([torch.stack([example[:-1], example[1:]]) for example in all_examples[0]])
-            test_tensor = torch.stack([torch.stack([example[:-1], example[1:]]) for example in all_examples[1]])
-            test_tensor[:, 1, :-1 * (self.num_extra_seq_len - 1)] = -100
-            if self.copy_method in ["assoc_recall"]:
-                test_tensor[:, 1, :-1] = -100
-            if self.copy_method in ["majority", "fom1"]:
-                train_tensor[:, 1, :-1 * (self.num_extra_seq_len - 1)] = -100
-            
-            torch.save(train_tensor, os.path.join(self.data_dir, 
-                f"train_{self.copy_method}_{self.num_examples}_{self.vocab_size}_{self.input_seq_len}.pt")
-            )
-            torch.save(test_tensor, os.path.join(self.data_dir, 
-                f"test_{self.copy_method}_{self.num_examples}_{self.vocab_size}_{self.input_seq_len}.pt")
-            )  
+                # all_examples = torch.concat(all_examples)
+                train_tensor = torch.stack([torch.stack([example[:-1], example[1:]]) for example in all_examples[0]])
+                test_tensor = torch.stack([torch.stack([example[:-1], example[1:]]) for example in all_examples[1]])
+                if self.copy_method not in ["FHN"]:
+                    test_tensor[:, 1, :-1 * (self.num_extra_seq_len - 1)] = -100
+                if self.copy_method in ["assoc_recall"]:
+                    test_tensor[:, 1, :-1] = -100
+                if self.copy_method in ["majority", "fom1"]:
+                    train_tensor[:, 1, :-1 * (self.num_extra_seq_len - 1)] = -100
+                
+                if self.data_dir is not None:
+                    torch.save(train_tensor, os.path.join(self.data_dir, 
+                        f"train_{self.copy_method}_{self.num_examples}_{self.vocab_size}_{self.input_seq_len}.pt")
+                    )
+                    torch.save(test_tensor, os.path.join(self.data_dir, 
+                        f"test_{self.copy_method}_{self.num_examples}_{self.vocab_size}_{self.input_seq_len}.pt")
+                    )  
              
-        self.dataset = {
-            'train': TensorDataset(train_tensor[:, 0, :], train_tensor[:, 1, :]),
-            'test': TensorDataset(test_tensor[:, 0, :], test_tensor[:, 1, :])
-        }
+        if self.copy_method not in ["FHN"]:
+            self.dataset = {
+                'train': TensorDataset(train_tensor[:, 0, :], train_tensor[:, 1, :]),
+                'test': TensorDataset(test_tensor[:, 0, :], test_tensor[:, 1, :])
+            }
+        else:
+            train_FHN_x, train_FHN_y = make_FHN(self.num_examples, self.input_seq_len)
+            test_FHN_x, test_FHN_y = make_FHN(self.num_test_examples, self.input_seq_len)
+            # self.dataset = {
+            #     'train': TensorDataset(torch.tensor(train_FHN_x, dtype=torch.float32), torch.tensor(train_FHN_y, dtype=torch.float32)),
+            #     'test': TensorDataset(torch.tensor(test_FHN_x, dtype=torch.float32), torch.tensor(test_FHN_y, dtype=torch.float32))
+            # }
+            self.dataset = {
+                'train': TensorDataset(torch.ones(train_FHN_x.shape, dtype=torch.float32), torch.ones(train_FHN_y.shape, dtype=torch.float32)),
+                'test': TensorDataset(torch.ones(test_FHN_x.shape, dtype=torch.float32), torch.ones(test_FHN_y.shape, dtype=torch.float32))
+            }
 
     def train_dataloader(self, *args, **kwargs):
         return self._data_loader(self.dataset['train'], shuffle=True)

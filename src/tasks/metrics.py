@@ -142,6 +142,18 @@ def mse(outs, y, len_batch=None):
         y_masked = torch.masked_select(y, mask)
         return F.mse_loss(outs_masked, y_masked)
 
+# Hardcoding for now, TODO fix
+def mse_forecast(outs, y, measure_end=1):
+    if len(y.shape) < len(outs.shape):
+        assert outs.shape[-1] == 1
+        outs = outs.squeeze(-1)
+    # return F.mse_loss(outs[-measure_end:], y[-measure_end:])
+    assert outs.shape == y[:, 0::2, :].shape
+    return F.mse_loss(outs, y[:, 0::2, :])
+
+def mse_relative(outs, y, axis_num=1):
+    return F.mse_loss((outs-y)/(torch.max(y, axis=axis_num).values.unsqueeze(axis_num)-torch.min(y, axis=axis_num).values.unsqueeze(axis_num)), torch.zeros(outs.shape).cuda())
+
 def forecast_rmse(outs, y, len_batch=None):
     # TODO: generalize, currently for Monash dataset
     return torch.sqrt(F.mse_loss(outs, y, reduction='none').mean(1)).mean()
@@ -191,6 +203,8 @@ output_metric_fns = {
     'accuracy@10': partial(accuracy_at_k, k=10),
     "eval_loss": loss,
     "mse": mse,
+    "mse_forecast": mse_forecast,
+    "mse_relative": mse_relative,
     "mae": mae,
     "forecast_rmse": forecast_rmse,
     "f1_binary": f1_binary,
