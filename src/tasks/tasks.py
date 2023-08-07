@@ -172,7 +172,6 @@ class PDETask(BaseTask):
         x, w = decoder(x, state=state)
         return x, y, w
 
-
 class LMTask(BaseTask):
     def forward(self, batch, encoder, model, decoder, _state):
         """Passes a batch through the encoder, backbone, and decoder"""

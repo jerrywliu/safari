@@ -147,9 +147,22 @@ def mse_forecast(outs, y, measure_end=1):
     if len(y.shape) < len(outs.shape):
         assert outs.shape[-1] == 1
         outs = outs.squeeze(-1)
-    # return F.mse_loss(outs[-measure_end:], y[-measure_end:])
-    assert outs.shape == y[:, 0::2, :].shape
+    # assert outs.shape == y[:, 0::2, :].shape
     return F.mse_loss(outs, y[:, 0::2, :])
+    # return F.mse_loss(outs, y[:, -1:, :])
+
+    # return F.mse_loss(outs[-measure_end:], y[-measure_end:])
+
+def mse_final_forecast(outs, y):
+    return F.mse_loss(outs[:, -1, :], y[:, -1, :])
+
+# TODO finish this
+def pde_params_forecast(outs, y, pde_params=None):
+    print(outs.shape)
+    print(y.shape)
+    if pde_params is not None:
+        print(pde_params.shape)
+    return F.mse_loss(outs, pde_params)
 
 def mse_relative(outs, y, axis_num=1):
     return F.mse_loss((outs-y)/(torch.max(y, axis=axis_num).values.unsqueeze(axis_num)-torch.min(y, axis=axis_num).values.unsqueeze(axis_num)), torch.zeros(outs.shape).cuda())
@@ -204,6 +217,8 @@ output_metric_fns = {
     "eval_loss": loss,
     "mse": mse,
     "mse_forecast": mse_forecast,
+    "mse_final_forecast": mse_final_forecast,
+    "pde_params_forecast": pde_params_forecast,
     "mse_relative": mse_relative,
     "mae": mae,
     "forecast_rmse": forecast_rmse,

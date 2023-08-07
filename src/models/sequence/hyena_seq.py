@@ -396,9 +396,9 @@ class HyenaSequenceModel(nn.Module):
     def __init__(self, d_model: int, n_layer: int, d_inner: int,
                  layer=None,
                  attn_layer_idx=None, attn_cfg=None, max_position_embeddings=0,
-                 resid_dropout: float = 0.0, embed_dropout: float = 0.1,
+                 resid_dropout: float = 0.0, embed_dropout: float = 0.1, pos_dropout: float = 0.1,
                  layer_norm_epsilon: float = 1e-5, initializer_cfg=None,residual_in_fp32=False,
-                 pad_vocab_size_multiple: int = 1,
+                 pad_vocab_size_multiple: int = 1, n_fourier_modes: int = 64,
                  device=None, dtype=None, **kwargs) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
@@ -411,8 +411,23 @@ class HyenaSequenceModel(nn.Module):
             initializer_cfg=initializer_cfg, residual_in_fp32=residual_in_fp32,
             **factory_kwargs, **kwargs
         )
+        self.positional = PositionalEncoding(
+            d_model=d_model,
+            dropout=pos_dropout,
+            device=device,
+        )
+        self.proj = torch.nn.Linear(
+            in_features=d_model,
+            out_features=32,
+        )
+        self.relu1 = torch.nn.ReLU()
+        self.relu2 = torch.nn.ReLU()
+        self.proj2 = torch.nn.Linear(
+            in_features=32,
+            out_features=1,
+        )
         self.fno = FNO1d(
-            n_modes_height=16,
+            n_modes_height=n_fourier_modes,
             hidden_channels=64,
             in_channels=1,
             out_channels=1 # takes in (batch x 1 x seqlen)
@@ -429,19 +444,57 @@ class HyenaSequenceModel(nn.Module):
         self.apply(partial(_init_weights, n_layer=n_layer,
                            **(initializer_cfg if initializer_cfg is not None else {})))
 
-    def forward(self, input_ids, position_ids=None, state=None): # state for the repo interface
+    def forward(self, input_ids, pde_params, position_ids=None, state=None): # state for the repo interface
         # print(input_ids.shape)
         hidden_states = self.backbone(input_ids, position_ids=position_ids)
+        encoding_vector = torch.tanh(torch.mean(hidden_states, axis=1)) # batch_size, d_model
+        pde_params_pred = self.relu1(self.proj2(
+            self.relu2(self.proj(encoding_vector))
+        ))
+        return pde_params_pred, None
+
         # print(hidden_states.shape)
-        encoding_vector = torch.tanh(torch.mean(hidden_states[:, 1::2, :], axis=1)) # batch_size x d_model
+        # This encoding method is non-causal and thus is cheating on the intermediate predictions
+        # TODO double-check this code is correct
+        """
+        encoding_vector = torch.tanh(torch.mean(hidden_states[:, :, :], axis=1)) # batch_size x d_model
         # print(encoding_vector.shape)
-        fno_in = input_ids[:, 0::2, :] # batch_size x num_examples x d_model
+        fno_in = input_ids[:, -1:, :] # batch_size x num_examples x d_model
         encoding_vector = encoding_vector.unsqueeze(1).repeat((1,fno_in.shape[1],1)) # batch_size x num_examples x d_model
-        # fno_in = (encoding_vector + input_ids[:, -1, :]).unsqueeze(1) # batch_size x 1 x d_model
         fno_in = fno_in + encoding_vector
         fno_in = rearrange(fno_in, 'b n d -> (b n) 1 d')
         fno_out = self.fno(fno_in)
         fno_out = rearrange(fno_out, '(b n) 1 d -> b n d', b=input_ids.shape[0])
+        """
+
+        # fno_in = (encoding_vector + input_ids[:, -1, :]).unsqueeze(1) # batch_size x 1 x d_model
+
+        # TODO: curriculum-like setup. Compute cumulative estimates of 
+        # encoding_vector = torch.cumsum(hidden_states, dim=1)
+        # # Compute cumulative lengths
+        # encoding_vector_lens = torch.arange(1, hidden_states.shape[1]+1, device=encoding_vector.device) # num_examples
+        # encoding_vector = encoding_vector / encoding_vector_lens[None, :, None]
+        # print(f"encoding vector: {encoding_vector.shape}")
+        # print(f"input: {input_ids.shape}")
+        # fno_in = input_ids[:, 0::2, :] + encoding_vector[:, 0::2, :]
+
+        # Extra supervision on FNO
+        # FNO baseline
+        """
+        fno_in = input_ids[:, 0::2, :] # batch_size, num_examples, d_model
+        pde_params = self.positional(pde_params) # batch_size, d_model
+        # num_examples - 1 so that the final embedding is the ICL embedding from Hyena
+        pde_params = pde_params.unsqueeze(1).repeat(1, fno_in.shape[1]-1, 1) # batch_size, num_examples-1, d_model
+        encoding_vector = torch.tanh(torch.mean(hidden_states[:, :, :], axis=1)) # batch_size, d_model
+        print(f"encoding vector: {encoding_vector.shape}")
+        pde_params = torch.cat([pde_params, encoding_vector.unsqueeze(1)], dim=1) # batch_size, num_examples, d_model
+        print(f"fno_in: {fno_in.shape}")
+        print(f"pde_params: {pde_params.shape}")
+        fno_in = fno_in + pde_params
+        fno_in = rearrange(fno_in, 'b n d -> (b n) 1 d')
+        fno_out = self.fno(fno_in)
+        fno_out = rearrange(fno_out, '(b n) 1 d -> b n d', b=input_ids.shape[0])
+        """
 
         # FNO baseline
         # fno_in = input_ids[:, -1, :].unsqueeze(1)
@@ -452,6 +505,7 @@ class HyenaSequenceModel(nn.Module):
         # return CausalLMOutput(logits=lm_logits), None
 
         # return hidden_states, None
+
         return fno_out, None
 
 class PositionalEncoding(nn.Module):
@@ -484,7 +538,7 @@ class PositionalEncoding(nn.Module):
 class FNOBaseline(nn.Module):
 
     def __init__(self, d_model: int, dropout: float = 0.1,
-                 fno_nmodes: int = 16, fno_nhidden: int = 64,
+                 fno_nmodes: int = 64, fno_nhidden: int = 64,
                  device=None, dtype=None, **kwargs) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()

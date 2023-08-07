@@ -283,9 +283,11 @@ class PDEDataModule(SequenceDataset):
         train_tensor = test_tensor = None
         # print(f"data dir: {self.data_dir}")
         # print(f"PDE: {self.pde}")
+        print("Reading file:")
         if self.pde in ["1d_burgers", "1d_burgers_seq", "1d_burgers_icl_t", "1d_burgers_seq2", "1d_burgers_icl_t2", "1d_burgers_icl_trange"]:
             df = h5py.File(os.path.join(self.data_dir, "1D/Burgers/Train/1D_Burgers_Sols_Nu0.1.hdf5"), "r")
             df_tensor = df["tensor"]
+            print("Read file")
             # try:
             train_tensor = torch.tensor(df_tensor[:self.num_examples], dtype=torch.float32)
             print(f"Train tensor shape: {train_tensor.shape}")
