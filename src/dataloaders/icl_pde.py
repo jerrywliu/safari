@@ -227,7 +227,7 @@ class PDEDataModule(SequenceDataset):
         # print(icl_seqs.shape)
         return icl_seqs
 
-    def get_icl_t2(self, num_seqs, num_examples, data, start=0.75, end=1):
+    def get_icl_t2(self, num_seqs, num_examples, data, start=0.75, end=1, return_time=False):
         data_x = data[:, 0, :] # dataset_size x L
         icl_seqs = []
         pde_t = []
@@ -243,7 +243,11 @@ class PDEDataModule(SequenceDataset):
             icl_seqs.append(icl_seq)
             pde_t.append(t)
         icl_seqs = torch.stack(icl_seqs, dim=0) # num_seqs x (2*num_examples) x L
-        pde_t = torch.tensor(pde_t) # num_seqs
+        if return_time:
+            pde_t = torch.tensor(pde_t)/data.shape[1]
+            print(pde_t)
+        else:
+            pde_t = torch.tensor(pde_t) # num_seqs
         return icl_seqs, pde_t
 
     def get_icl_trange(self, num_seqs, num_examples, data, start=0.75, end=1, num_steps=8):
@@ -284,7 +288,7 @@ class PDEDataModule(SequenceDataset):
         # print(f"data dir: {self.data_dir}")
         # print(f"PDE: {self.pde}")
         print("Reading file:")
-        if self.pde in ["1d_burgers", "1d_burgers_seq", "1d_burgers_icl_t", "1d_burgers_seq2", "1d_burgers_icl_t2", "1d_burgers_icl_trange"]:
+        if self.pde in ["1d_burgers", "1d_burgers_seq", "1d_burgers_icl_t", "1d_burgers_seq2", "1d_burgers_icl_t2", "1d_burgers_icl_trange", "1d_burgers_predict_t"]:
             df = h5py.File(os.path.join(self.data_dir, "1D/Burgers/Train/1D_Burgers_Sols_Nu0.1.hdf5"), "r")
             df_tensor = df["tensor"]
             print("Read file")
@@ -309,9 +313,13 @@ class PDEDataModule(SequenceDataset):
                 print(f"ICL train examples shape: {icl_train_examples.shape}")
                 icl_test_examples = self.get_icl2(self.num_test_examples, self.num_initial_conditions, test_tensor_x, test_tensor_y)
             if self.pde in ["1d_burgers_icl_t2"]:
-                icl_train_examples, pde_t_train = self.get_icl_t2(self.num_examples, self.num_initial_conditions, train_tensor, start=0.25, end=1) # num_examples x L x 1
+                icl_train_examples, pde_t_train = self.get_icl_t2(self.num_examples, self.num_initial_conditions, train_tensor, start=0.25, end=1, return_time=True) # num_examples x L x 1
                 print(f"ICL train examples shape: {icl_train_examples.shape}")
-                icl_test_examples, pde_t_test = self.get_icl_t2(self.num_test_examples, self.num_initial_conditions, test_tensor, start=0.25, end=1) # num_test_examples x L x 1
+                icl_test_examples, pde_t_test = self.get_icl_t2(self.num_test_examples, self.num_initial_conditions, test_tensor, start=0.25, end=1, return_time=True) # num_test_examples x L x 1
+            elif self.pde in ["1d_burgers_predict_t"]:
+                icl_train_examples, pde_t_train = self.get_icl_t2(self.num_examples, self.num_initial_conditions, train_tensor, start=0.25, end=1, return_time=True) # num_examples x L x 1
+                print(f"ICL train examples shape: {icl_train_examples.shape}")
+                icl_test_examples, pde_t_test = self.get_icl_t2(self.num_test_examples, self.num_initial_conditions, test_tensor, start=0.25, end=1, return_time=True) # num_test_examples x L x 1
             if self.pde in ["1d_burgers_icl_trange"]:
                 icl_train_examples, pde_t_train = self.get_icl_trange(self.num_examples, self.num_initial_conditions, train_tensor, start=0.25, end=1) # num_examples x L x 1
                 print(f"ICL train examples shape: {icl_train_examples.shape}")
@@ -416,6 +424,22 @@ class PDEDataModule(SequenceDataset):
                     icl_test_examples[:, :-1, :],
                     # icl_test_examples[:, 1:, :]
                     icl_test_examples[:, 1:, :],
+                    pde_t_test,
+                )
+            }
+
+        if self.pde in ["1d_burgers_predict_t"]:
+            self.dataset = {
+                "train": TensorDataset(
+                    icl_train_examples[:, :-1, :],
+                    # icl_train_examples[:, 1:, :]
+                    # icl_train_examples[:, 1:, :],
+                    pde_t_train,
+                ),
+                "test": TensorDataset(
+                    icl_test_examples[:, :-1, :],
+                    # icl_test_examples[:, 1:, :]
+                    # icl_test_examples[:, 1:, :],
                     pde_t_test,
                 )
             }

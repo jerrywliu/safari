@@ -416,16 +416,7 @@ class HyenaSequenceModel(nn.Module):
             dropout=pos_dropout,
             device=device,
         )
-        self.proj = torch.nn.Linear(
-            in_features=d_model,
-            out_features=32,
-        )
-        self.relu1 = torch.nn.ReLU()
-        self.relu2 = torch.nn.ReLU()
-        self.proj2 = torch.nn.Linear(
-            in_features=32,
-            out_features=1,
-        )
+        self.ln0 = torch.nn.LayerNorm(d_model)
         self.fno = FNO1d(
             n_modes_height=n_fourier_modes,
             hidden_channels=64,
@@ -446,17 +437,21 @@ class HyenaSequenceModel(nn.Module):
 
     def forward(self, input_ids, pde_params, position_ids=None, state=None): # state for the repo interface
         # print(input_ids.shape)
+        # PDE parameter regression setup
+        """
         hidden_states = self.backbone(input_ids, position_ids=position_ids)
         encoding_vector = torch.tanh(torch.mean(hidden_states, axis=1)) # batch_size, d_model
-        pde_params_pred = self.relu1(self.proj2(
-            self.relu2(self.proj(encoding_vector))
-        ))
+        encoding_vector = self.ln0(encoding_vector)
+        pde_params_pred = torch.sigmoid(torch.mean(encoding_vector, axis=1)) # batch_size
+
         return pde_params_pred, None
+        """
 
         # print(hidden_states.shape)
         # This encoding method is non-causal and thus is cheating on the intermediate predictions
         # TODO double-check this code is correct
         """
+        hidden_states = self.backbone(input_ids, position_ids=position_ids)
         encoding_vector = torch.tanh(torch.mean(hidden_states[:, :, :], axis=1)) # batch_size x d_model
         # print(encoding_vector.shape)
         fno_in = input_ids[:, -1:, :] # batch_size x num_examples x d_model
@@ -480,21 +475,27 @@ class HyenaSequenceModel(nn.Module):
 
         # Extra supervision on FNO
         # FNO baseline
-        """
+        # """
+
+        hidden_states = self.backbone(input_ids, position_ids=position_ids)
+        encoding_vector = torch.tanh(torch.mean(hidden_states, axis=1)) # batch_size, d_model
+        encoding_vector = self.ln0(encoding_vector)
+        pde_params_pred = torch.sigmoid(torch.mean(encoding_vector, axis=1)) # batch_size
+
         fno_in = input_ids[:, 0::2, :] # batch_size, num_examples, d_model
-        pde_params = self.positional(pde_params) # batch_size, d_model
+        pde_params_embed = self.positional(pde_params) # batch_size, d_model
         # num_examples - 1 so that the final embedding is the ICL embedding from Hyena
-        pde_params = pde_params.unsqueeze(1).repeat(1, fno_in.shape[1]-1, 1) # batch_size, num_examples-1, d_model
-        encoding_vector = torch.tanh(torch.mean(hidden_states[:, :, :], axis=1)) # batch_size, d_model
-        print(f"encoding vector: {encoding_vector.shape}")
-        pde_params = torch.cat([pde_params, encoding_vector.unsqueeze(1)], dim=1) # batch_size, num_examples, d_model
-        print(f"fno_in: {fno_in.shape}")
-        print(f"pde_params: {pde_params.shape}")
-        fno_in = fno_in + pde_params
+        pde_params_embed = pde_params_embed.unsqueeze(1).repeat(1, fno_in.shape[1]-1, 1) # batch_size, num_examples-1, d_model
+
+        pde_params_embed_pred = self.positional(pde_params_pred) #batch_size, d_model
+        pde_params_embeds = torch.cat([pde_params_embed, pde_params_embed_pred.unsqueeze(1)], dim=1) # batch_size, num_examples, d_model
+        # print(f"fno_in: {fno_in.shape}")
+        print(f"pde_params: {pde_params_embeds.shape}")
+        fno_in = fno_in + pde_params_embeds
         fno_in = rearrange(fno_in, 'b n d -> (b n) 1 d')
         fno_out = self.fno(fno_in)
         fno_out = rearrange(fno_out, '(b n) 1 d -> b n d', b=input_ids.shape[0])
-        """
+        # """
 
         # FNO baseline
         # fno_in = input_ids[:, -1, :].unsqueeze(1)

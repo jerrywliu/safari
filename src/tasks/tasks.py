@@ -164,13 +164,31 @@ class PDETask(BaseTask):
     def forward(self, batch, encoder, model, decoder, _state):
         """Passes a batch through the encoder, backbone, and decoder"""
         # z holds arguments such as sequence length
-        x, y, pde_params = batch # z holds extra dataloader info such as resolution
+        if len(batch) == 2:
+            x, pde_params = batch
+        elif len(batch) == 3:
+            x, y, pde_params = batch # z holds extra dataloader info such as resolution
 
         x, w = encoder(x) # w can model-specific constructions such as key_padding_mask for transformers or state for RNNs
         x, state = model(x, pde_params, **w, state=_state)
         self._state = state
         x, w = decoder(x, state=state)
         return x, y, w
+
+class PDEInverseTask(BaseTask):
+    def forward(self, batch, encoder, model, decoder, _state):
+        """Passes a batch through the encoder, backbone, and decoder"""
+        # z holds arguments such as sequence length
+        if len(batch) == 2:
+            x, pde_params = batch
+        elif len(batch) == 3:
+            x, y, pde_params = batch # z holds extra dataloader info such as resolution
+
+        x, w = encoder(x) # w can model-specific constructions such as key_padding_mask for transformers or state for RNNs
+        x, state = model(x, pde_params, **w, state=_state)
+        self._state = state
+        x, w = decoder(x, state=state)
+        return x, pde_params, w
 
 class LMTask(BaseTask):
     def forward(self, batch, encoder, model, decoder, _state):
@@ -378,6 +396,7 @@ class ImageNetTask(BaseTask):
 registry = {
     'base': BaseTask,
     'pde': PDETask,
+    'pde_inverse': PDEInverseTask,
     'lm': LMTask,
     'imagenet': ImageNetTask,
     'forecasting': ForecastingTask,

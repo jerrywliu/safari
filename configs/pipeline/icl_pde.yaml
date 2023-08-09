@@ -13,10 +13,12 @@ train:
 
 task:
   _name_: pde
-  # loss: mse_forecast
-  loss: pde_params_forecast
+  # _name_: pde_inverse
+  loss: mse_forecast
+  # loss: pde_params_forecast
   # metrics: ['mse_forecast', "mse", "mse_relative"]
-  metrics: ["mse_forecast", "mse_final_forecast", "pde_params_forecast"]
+  metrics: ["mse_forecast", "mse_final_forecast"]
+  # metrics: ["pde_params_forecast"]
 
 encoder: null
 decoder: null

@@ -160,9 +160,12 @@ def mse_final_forecast(outs, y):
 def pde_params_forecast(outs, y, pde_params=None):
     print(outs.shape)
     print(y.shape)
-    if pde_params is not None:
-        print(pde_params.shape)
-    return F.mse_loss(outs, pde_params)
+    return F.mse_loss(outs, y.to(outs.dtype))
+    # print(outs.shape)
+    # print(y.shape)
+    # if pde_params is not None:
+    #     print(pde_params.shape)
+    # return F.mse_loss(outs, pde_params)
 
 def mse_relative(outs, y, axis_num=1):
     return F.mse_loss((outs-y)/(torch.max(y, axis=axis_num).values.unsqueeze(axis_num)-torch.min(y, axis=axis_num).values.unsqueeze(axis_num)), torch.zeros(outs.shape).cuda())
